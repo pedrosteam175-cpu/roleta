@@ -2,135 +2,143 @@ import { db } from '@/db';
 import { appConfig } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 
-/** Read Asaas credentials — DB config takes priority over env vars */
-export async function getAsaasConfig(): Promise<{ apiKey: string; apiUrl: string }> {
-  let apiKey = process.env.ASAAS_API_KEY ?? '';
-  let apiUrl = process.env.ASAAS_API_URL ?? 'https://www.asaas.com/api/v3';
-
+async function getConfig(key: string, env?: string): Promise<string> {
   try {
-    const rows = await db
+    const [row] = await db
       .select()
       .from(appConfig)
-      .where(eq(appConfig.key, 'asaas_api_key'));
-    if (rows.length && rows[0].value) apiKey = rows[0].value;
+      .where(eq(appConfig.key, key));
 
-    const urlRows = await db
-      .select()
-      .from(appConfig)
-      .where(eq(appConfig.key, 'asaas_api_url'));
-    if (urlRows.length && urlRows[0].value) apiUrl = urlRows[0].value;
-  } catch {
-    // Fall back to env vars if DB read fails
-  }
-
-  return { apiKey, apiUrl };
-}
-
-async function asaasRequest(path: string, method: string, body?: unknown) {
-  const { apiKey, apiUrl } = await getAsaasConfig();
-  const res = await fetch(`${apiUrl}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'access_token': apiKey,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Asaas error ${res.status}: ${err}`);
-  }
-  return res.json();
-}
-
-export async function createOrGetCustomer(params: { name: string; email: string; cpf: string }) {
-  try {
-    const existing = await asaasRequest(`/customers?cpfCnpj=${params.cpf.replace(/\D/g, '')}`, 'GET');
-    if (existing.data && existing.data.length > 0) return existing.data[0];
+    if (row?.value) return row.value;
   } catch {}
-  return asaasRequest('/customers', 'POST', {
-    name: params.name,
-    email: params.email,
-    cpfCnpj: params.cpf.replace(/\D/g, ''),
-  });
+
+  return env ?? "";
 }
 
-export async function createPixCharge(params: { customerId: string; amount: number; description: string }) {
-  return asaasRequest('/payments', 'POST', {
-    customer: params.customerId,
-    billingType: 'PIX',
-    value: params.amount,
-    dueDate: new Date(Date.now() + 24 * 3600 * 1000).toISOString().split('T')[0],
-    description: params.description,
-  });
+export async function getPaypalClientId() {
+  return getConfig(
+    "paypal_client_id",
+    process.env.PAYPAL_CLIENT_ID
+  );
 }
 
-export async function getPixQrCode(paymentId: string) {
-  return asaasRequest(`/payments/${paymentId}/pixQrCode`, 'GET');
+export async function getPaypalSecret() {
+  return getConfig(
+    "paypal_client_secret",
+    process.env.PAYPAL_CLIENT_SECRET
+  );
 }
 
-export async function createPixTransfer(params: {
-  name: string; cpf: string; pixKey: string; amount: number; description: string;
-}) {
-  return asaasRequest('/transfers', 'POST', {
-    value: params.amount,
-    operationType: 'PIX',
-    pixAddressKey: params.pixKey,
-    pixAddressKeyType: 'CPF',
-    description: params.description,
-  });
+export async function getPaypalEnvironment() {
+  return (
+    await getConfig(
+      "paypal_environment",
+      process.env.PAYPAL_ENVIRONMENT
+    )
+  ) || "sandbox";
 }
 
-export async function getPayment(paymentId: string) {
-  return asaasRequest(`/payments/${paymentId}`, 'GET');
+function getBaseUrl(env: string) {
+  return env === "live"
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
 }
 
-export interface CardData {
-  holderName: string;
-  number: string;
-  expiryMonth: string;
-  expiryYear: string;
-  ccv: string;
+export async function getAccessToken(): Promise<string> {
+  const clientId = await getPaypalClientId();
+  const secret = await getPaypalSecret();
+  const env = await getPaypalEnvironment();
+
+  if (!clientId || !secret)
+    throw new Error("PayPal não configurado.");
+
+  const auth = Buffer.from(
+    `${clientId}:${secret}`
+  ).toString("base64");
+
+  const response = await fetch(
+    `${getBaseUrl(env)}/v1/oauth2/token`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type":
+          "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error("Erro ao autenticar no PayPal.");
+  }
+
+  const json = await response.json();
+
+  return json.access_token;
 }
 
-export interface CardHolderInfo {
-  name: string;
+export interface PaypalPayoutDTO {
   email: string;
-  cpfCnpj: string;
-  postalCode: string;
-  addressNumber: string;
-  phone: string;
+  amount: number;
+  note?: string;
+  senderItemId?: string;
 }
 
-export async function createCreditCardCharge(params: {
-  customerId: string;
-  amount: number;
-  description: string;
-  card: CardData;
-  holderInfo: CardHolderInfo;
-  remoteIp: string;
-}) {
-  return asaasRequest('/payments', 'POST', {
-    customer: params.customerId,
-    billingType: 'CREDIT_CARD',
-    value: params.amount,
-    dueDate: new Date(Date.now() + 24 * 3600 * 1000).toISOString().split('T')[0],
-    description: params.description,
-    creditCard: {
-      holderName: params.card.holderName,
-      number: params.card.number.replace(/\s/g, ''),
-      expiryMonth: params.card.expiryMonth,
-      expiryYear: params.card.expiryYear,
-      ccv: params.card.ccv,
-    },
-    creditCardHolderInfo: {
-      name: params.holderInfo.name,
-      email: params.holderInfo.email,
-      cpfCnpj: params.holderInfo.cpfCnpj.replace(/\D/g, ''),
-      postalCode: params.holderInfo.postalCode.replace(/\D/g, ''),
-      addressNumber: params.holderInfo.addressNumber,
-      phone: params.holderInfo.phone.replace(/\D/g, ''),
-    },
-    remoteIp: params.remoteIp,
-  });
+export async function sendPaypalPayout(
+  payout: PaypalPayoutDTO
+) {
+  const token = await getAccessToken();
+  const env = await getPaypalEnvironment();
+
+  const response = await fetch(
+    `${getBaseUrl(env)}/v1/payments/payouts`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        sender_batch_header: {
+          sender_batch_id:
+            payout.senderItemId ??
+            crypto.randomUUID(),
+          email_subject:
+            "Você recebeu um pagamento",
+          email_message:
+            payout.note ??
+            "Seu saque foi processado."
+        },
+        items: [
+          {
+            recipient_type: "EMAIL",
+            receiver: payout.email,
+            amount: {
+              currency: "BRL",
+              value: payout.amount.toFixed(2)
+            },
+            note:
+              payout.note ??
+              "Pagamento",
+            sender_item_id:
+              payout.senderItemId ??
+              crypto.randomUUID()
+          }
+        ]
+      })
+    }
+  );
+
+  const json = await response.json();
+
+  if (!response.ok) {
+    console.error(json);
+    throw new Error(
+      json.message ??
+      "Erro ao enviar pagamento."
+    );
+  }
+
+  return json;
 }
