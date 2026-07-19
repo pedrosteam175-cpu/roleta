@@ -4,7 +4,6 @@ import { users, transactions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentUser, generateId } from "@/lib/auth";
 import {
-  getPaypalClientId,
   sendPaypalPayout,
 } from "@/lib/paypal";
 
@@ -30,17 +29,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!paypalEmail) {
+    if (
+      !paypalEmail ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paypalEmail)
+    ) {
       return NextResponse.json(
-        { error: "Informe o e-mail PayPal." },
+        { error: "E-mail PayPal inválido." },
         { status: 400 }
       );
     }
+
 
     const [user] = await db
       .select()
       .from(users)
       .where(eq(users.id, authUser.id));
+
 
     if (!user) {
       return NextResponse.json(
@@ -49,6 +53,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+
     if (user.balance < value) {
       return NextResponse.json(
         { error: "Saldo insuficiente" },
@@ -56,18 +61,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const clientId = await getPaypalClientId();
-
-    if (!clientId) {
-      return NextResponse.json(
-        {
-          error: "PayPal não configurado."
-        },
-        { status: 503 }
-      );
-    }
 
     const txId = generateId();
+
 
     const payout = await sendPaypalPayout({
       email: paypalEmail,
@@ -76,9 +72,11 @@ export async function POST(req: NextRequest) {
       senderItemId: txId,
     });
 
+
     const newBalance = Number(
       (user.balance - value).toFixed(2)
     );
+
 
     await db
       .update(users)
@@ -89,6 +87,7 @@ export async function POST(req: NextRequest) {
       })
       .where(eq(users.id, user.id));
 
+
     await db.insert(transactions).values({
       id: txId,
       userId: user.id,
@@ -98,20 +97,25 @@ export async function POST(req: NextRequest) {
       description: `Saque PayPal R$ ${value.toFixed(2)}`,
     });
 
+
     return NextResponse.json({
       success: true,
       payout,
       newBalance,
     });
 
+
   } catch (err) {
-    console.error(err);
+
+    console.error("WITHDRAW ERROR:", err);
 
     return NextResponse.json(
       {
         error: "Erro ao processar saque."
       },
-      { status: 500 }
+      {
+        status: 500
+      }
     );
   }
 }
