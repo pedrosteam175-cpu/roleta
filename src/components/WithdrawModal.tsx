@@ -13,71 +13,100 @@ export default function WithdrawModal({
   onClose,
   onSuccess,
 }: WithdrawModalProps) {
+
   const [amount, setAmount] = useState('');
   const [paypalEmail, setPaypalEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
+
   async function handleWithdraw(e: React.FormEvent) {
     e.preventDefault();
 
     const value = Number(amount);
+
 
     if (!value || value <= 0) {
       setError('Informe um valor válido');
       return;
     }
 
+
     if (value > balance) {
       setError('Saldo insuficiente');
       return;
     }
 
-    if (!paypalEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paypalEmail)) {
+
+    if (
+      !paypalEmail ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paypalEmail)
+    ) {
       setError('Informe um e-mail PayPal válido');
       return;
     }
 
+
     setError('');
     setLoading(true);
 
+
     try {
+
       const res = await fetch('/api/payment/withdraw', {
         method: 'POST',
+
         headers: {
           'Content-Type': 'application/json',
         },
+
         credentials: 'include',
+
         body: JSON.stringify({
           amount: value,
           paypalEmail,
         }),
       });
 
+
       const data = await res.json();
+
 
       if (!res.ok) {
         setError(data.error || 'Erro ao processar saque');
         return;
       }
 
+
       setSuccess(true);
       onSuccess(data.newBalance);
 
+
     } catch {
+
       setError('Erro ao processar saque');
+
     } finally {
+
       setLoading(false);
+
     }
   }
 
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+
+    <div
+      className="modal-overlay"
+      onClick={onClose}
+    >
+
       <div
         className="modal-box"
         onClick={(e) => e.stopPropagation()}
       >
+
 
         <div
           style={{
@@ -87,9 +116,16 @@ export default function WithdrawModal({
             alignItems: 'center',
           }}
         >
-          <h2 style={{ fontSize: 22, fontWeight: 800 }}>
+
+          <h2
+            style={{
+              fontSize: 22,
+              fontWeight: 800,
+            }}
+          >
             💸 Sacar
           </h2>
+
 
           <button
             onClick={onClose}
@@ -103,19 +139,39 @@ export default function WithdrawModal({
           >
             ✕
           </button>
+
         </div>
 
 
-        {success ? (
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
 
-            <div style={{ fontSize: 48, marginBottom: 12 }}>
+        {success ? (
+
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '20px 0',
+            }}
+          >
+
+            <div
+              style={{
+                fontSize: 48,
+                marginBottom: 12,
+              }}
+            >
               ✅
             </div>
 
-            <h3 style={{ fontSize: 20, fontWeight: 700 }}>
+
+            <h3
+              style={{
+                fontSize: 20,
+                fontWeight: 700,
+              }}
+            >
               Saque solicitado!
             </h3>
+
 
             <p
               style={{
@@ -123,8 +179,9 @@ export default function WithdrawModal({
                 margin: '12px 0 20px',
               }}
             >
-              O valor será enviado para sua conta PayPal.
+              O pagamento será enviado para sua conta PayPal.
             </p>
+
 
             <button
               className="btn-primary"
@@ -135,7 +192,9 @@ export default function WithdrawModal({
 
           </div>
 
+
         ) : (
+
 
           <form
             onSubmit={handleWithdraw}
@@ -146,6 +205,7 @@ export default function WithdrawModal({
             }}
           >
 
+
             <div
               style={{
                 background: 'var(--bg-card2)',
@@ -153,6 +213,7 @@ export default function WithdrawModal({
                 padding: 14,
               }}
             >
+
               <p
                 style={{
                   color: 'var(--text-muted)',
@@ -161,6 +222,7 @@ export default function WithdrawModal({
               >
                 Saldo disponível
               </p>
+
 
               <p
                 style={{
@@ -173,10 +235,16 @@ export default function WithdrawModal({
                   minimumFractionDigits: 2,
                 })}
               </p>
+
             </div>
 
 
-            <div style={{ position: 'relative' }}>
+
+            <div
+              style={{
+                position: 'relative',
+              }}
+            >
 
               <span
                 style={{
@@ -190,9 +258,12 @@ export default function WithdrawModal({
                 R$
               </span>
 
+
               <input
                 className="input-field"
-                style={{ paddingLeft: 40 }}
+                style={{
+                  paddingLeft: 40,
+                }}
                 type="number"
                 step="0.01"
                 min="0.01"
@@ -206,6 +277,7 @@ export default function WithdrawModal({
             </div>
 
 
+
             <div>
 
               <label
@@ -216,3 +288,81 @@ export default function WithdrawModal({
                   marginBottom: 6,
                 }}
               >
+                E-mail da conta PayPal
+              </label>
+
+
+              <input
+                className="input-field"
+                type="email"
+                placeholder="seuemail@paypal.com"
+                value={paypalEmail}
+                onChange={(e) => setPaypalEmail(e.target.value)}
+                required
+              />
+
+            </div>
+
+
+
+            <div
+              style={{
+                background: 'var(--bg-card2)',
+                borderRadius: 10,
+                padding: 12,
+                fontSize: 13,
+              }}
+            >
+
+              <p style={{ color: 'var(--text-muted)' }}>
+                💳 Pagamento via PayPal Payouts
+              </p>
+
+
+              <p style={{ color: 'var(--text-muted)' }}>
+                ⏱️ Processamento estimado: até 30 minutos.
+              </p>
+
+            </div>
+
+
+
+            {error && (
+
+              <p
+                style={{
+                  color: 'var(--accent-red)',
+                  fontSize: 14,
+                }}
+              >
+                {error}
+              </p>
+
+            )}
+
+
+
+            <button
+              className="btn-primary"
+              type="submit"
+              disabled={loading || !amount || !paypalEmail}
+            >
+
+              {loading
+                ? 'Processando...'
+                : 'Solicitar Saque'}
+
+            </button>
+
+
+          </form>
+
+        )}
+
+
+      </div>
+
+    </div>
+
+  );
+}
