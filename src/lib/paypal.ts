@@ -15,6 +15,7 @@ async function getConfig(key: string, env?: string): Promise<string> {
   return env ?? "";
 }
 
+
 export async function getPaypalClientId() {
   return getConfig(
     "paypal_client_id",
@@ -22,12 +23,14 @@ export async function getPaypalClientId() {
   );
 }
 
+
 export async function getPaypalSecret() {
   return getConfig(
     "paypal_client_secret",
     process.env.PAYPAL_CLIENT_SECRET
   );
 }
+
 
 export async function getPaypalEnvironment() {
   return (
@@ -38,23 +41,28 @@ export async function getPaypalEnvironment() {
   ) || "sandbox";
 }
 
+
 function getBaseUrl(env: string) {
   return env === "live"
     ? "https://api-m.paypal.com"
     : "https://api-m.sandbox.paypal.com";
 }
 
-export async function getAccessToken(): Promise<string> {
+
+export async function getAccessToken() {
   const clientId = await getPaypalClientId();
   const secret = await getPaypalSecret();
   const env = await getPaypalEnvironment();
 
-  if (!clientId || !secret)
+  if (!clientId || !secret) {
     throw new Error("PayPal não configurado.");
+  }
 
-  const auth = Buffer.from(
-    `${clientId}:${secret}`
-  ).toString("base64");
+
+  const auth = Buffer
+    .from(`${clientId}:${secret}`)
+    .toString("base64");
+
 
   const response = await fetch(
     `${getBaseUrl(env)}/v1/oauth2/token`,
@@ -65,18 +73,24 @@ export async function getAccessToken(): Promise<string> {
         "Content-Type":
           "application/x-www-form-urlencoded",
       },
-      body: "grant_type=client_credentials",
+      body:
+        "grant_type=client_credentials",
     }
   );
 
+
   if (!response.ok) {
-    throw new Error("Erro ao autenticar no PayPal.");
+    throw new Error(
+      "Falha ao autenticar no PayPal."
+    );
   }
 
-  const json = await response.json();
 
-  return json.access_token;
+  const data = await response.json();
+
+  return data.access_token;
 }
+
 
 export interface PaypalPayoutDTO {
   email: string;
@@ -85,60 +99,112 @@ export interface PaypalPayoutDTO {
   senderItemId?: string;
 }
 
+
 export async function sendPaypalPayout(
   payout: PaypalPayoutDTO
 ) {
+
+  if (
+    !payout.email ||
+    payout.amount <= 0
+  ) {
+    throw new Error(
+      "Dados do payout inválidos."
+    );
+  }
+
+
   const token = await getAccessToken();
   const env = await getPaypalEnvironment();
+
+
+  const batchId =
+    payout.senderItemId ??
+    crypto.randomUUID();
+
 
   const response = await fetch(
     `${getBaseUrl(env)}/v1/payments/payouts`,
     {
       method: "POST",
+
       headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+        Authorization:
+          `Bearer ${token}`,
+        "Content-Type":
+          "application/json",
       },
+
+
       body: JSON.stringify({
+
         sender_batch_header: {
-          sender_batch_id:
-            payout.senderItemId ??
-            crypto.randomUUID(),
+
+          sender_batch_id: batchId,
+
           email_subject:
-            "Você recebeu um pagamento",
+            "Seu saque foi enviado",
+
           email_message:
             payout.note ??
-            "Seu saque foi processado."
+            "Seu pagamento foi processado."
+
         },
+
+
         items: [
+
           {
-            recipient_type: "EMAIL",
-            receiver: payout.email,
+
+            recipient_type:
+              "EMAIL",
+
+            receiver:
+              payout.email,
+
             amount: {
-              currency: "BRL",
-              value: payout.amount.toFixed(2)
+
+              value:
+                payout.amount.toFixed(2),
+
+              currency:
+                "BRL"
+
             },
+
             note:
               payout.note ??
-              "Pagamento",
+              "Saque",
+
             sender_item_id:
-              payout.senderItemId ??
-              crypto.randomUUID()
+              batchId
+
           }
+
         ]
+
       })
     }
   );
 
-  const json = await response.json();
+
+  const data = await response.json();
+
 
   if (!response.ok) {
-    console.error(json);
-    throw new Error(
-      json.message ??
-      "Erro ao enviar pagamento."
+
+    console.error(
+      "PayPal Payout Error:",
+      data
     );
+
+    throw new Error(
+      data.message ||
+      "Erro no PayPal Payout."
+    );
+
   }
 
-  return json;
+
+  return data;
 }
