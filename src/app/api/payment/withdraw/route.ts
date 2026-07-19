@@ -3,9 +3,7 @@ import { db } from "@/db";
 import { users, transactions } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getCurrentUser, generateId } from "@/lib/auth";
-import {
-  sendPaypalPayout,
-} from "@/lib/paypal";
+import { sendPaypalPayout } from "@/lib/paypal";
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,9 +16,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+
     const { amount, paypalEmail } = await req.json();
 
     const value = Number(amount);
+
 
     if (!value || value <= 0) {
       return NextResponse.json(
@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
 
     if (
       !paypalEmail ||
@@ -73,6 +74,10 @@ export async function POST(req: NextRequest) {
     });
 
 
+    const payoutId =
+      payout?.batch_header?.payout_batch_id || null;
+
+
     const newBalance = Number(
       (user.balance - value).toFixed(2)
     );
@@ -82,40 +87,73 @@ export async function POST(req: NextRequest) {
       .update(users)
       .set({
         balance: newBalance,
-        totalWithdrawn: user.totalWithdrawn + value,
+
+        totalWithdrawn:
+          user.totalWithdrawn + value,
+
         updatedAt: new Date(),
       })
       .where(eq(users.id, user.id));
 
 
+
     await db.insert(transactions).values({
+
       id: txId,
+
       userId: user.id,
+
       type: "withdrawal",
+
       status: "completed",
+
       amount: value,
-      description: `Saque PayPal R$ ${value.toFixed(2)}`,
+
+
+      paypalEmail,
+
+      paypalBatchId: payoutId,
+
+      paypalPayoutId: payoutId,
+
+
+      description:
+        `Saque PayPal R$ ${value.toFixed(2)}`,
+
     });
 
 
+
     return NextResponse.json({
+
       success: true,
+
       payout,
+
       newBalance,
+
     });
 
 
   } catch (err) {
 
-    console.error("WITHDRAW ERROR:", err);
+    console.error(
+      "WITHDRAW ERROR:",
+      err
+    );
+
 
     return NextResponse.json(
       {
-        error: "Erro ao processar saque."
+        error:
+          err instanceof Error
+            ? err.message
+            : "Erro ao processar saque."
       },
       {
         status: 500
       }
     );
+
   }
 }
